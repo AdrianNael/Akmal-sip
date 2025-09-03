@@ -324,12 +324,12 @@ export default function RemoveBgTool() {
                     <select
                       value={nim}
                       onChange={(e) => setNim(e.target.value)}
-                      className="w-full p-2 border rounded"
+                      className="w-full p-2 border rounded bg-white text-gray-900 dark:bg-gray-800 dark:text-white"
                     >
-                      <option value="">Pilih NIM</option>
+                      <option value="">Pilih NIM Mahasiswa</option>
                       {students.map((s) => (
                         <option key={s.nomor_induk} value={s.nomor_induk}>
-                          {s.nomor_induk}
+                          {s.nomor_induk} - {s.nama}
                         </option>
                       ))}
                     </select>
@@ -351,15 +351,6 @@ export default function RemoveBgTool() {
                         onChange={(e) => setProdi(e.target.value)}
                       />
                     </div>
-                  </div>
-
-                  <div>
-                    <Label className="mb-3">ID Foto</Label>
-                    <Input
-                      value={idFoto}
-                      onChange={(e) => setIdFoto(e.target.value)}
-                      placeholder="Misal: 2025-001"
-                    />
                   </div>
                 </div>
 

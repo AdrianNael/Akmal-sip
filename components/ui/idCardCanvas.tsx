@@ -19,24 +19,61 @@ const IDCardCanvas = forwardRef<IDCardCanvasHandle, IDCardCanvasProps>(
   ({ photoUrl, name, prodi, nim, idFoto }, ref) => {
     const canvasRef = useRef<HTMLDivElement>(null);
 
-    const handleDownload = async () => {
-      try {
-        const response = await fetch(photoUrl);
-        const blob = await response.blob();
-        const url = URL.createObjectURL(blob);
+  const handleDownload = async () => {
+  try {
+    // 1. Ambil foto asli
+    const response = await fetch(photoUrl);
+    const blob = await response.blob();
 
-        const filename = `${nim}_${name}_${prodi}_${idFoto}`;
+    // 2. Nama file sementara (buat upload ke server)
+    const tempFilename = `${nim}_${name}_${prodi}_${idFoto}.png`;
 
-        const link = document.createElement("a");
-        link.href = url;
-        link.download = `${filename || "idcard"}.png`;
-        link.click();
+    // 3. Kirim ke server
+    const formData = new FormData();
+    formData.append("file", blob, tempFilename);
+    formData.append("nim", nim);
+    formData.append("name", name);
+    formData.append("prodi", prodi);
+    formData.append("idFoto", idFoto);
 
-        URL.revokeObjectURL(url);
-      } catch (error) {
-        console.error("Error downloading image:", error);
-      }
-    };
+    const res = await fetch("http://localhost:5000/save-idcard", {
+      method: "POST",
+      body: formData,
+    });
+
+    if (!res.ok) {
+      const errText = await res.text();
+      console.error("❌ Server error:", errText);
+      return;
+    }
+
+    const data = await res.json();
+    console.log("✅ Response server:", data);
+
+    // 4. Download pakai nama final dari server
+    if (data.success && data.filePath) {
+      const fileUrl = `http://localhost:5000${data.filePath}`;
+      const finalFilename = data.filePath.split("/").pop(); // ambil nama file dari path server
+
+      const fileRes = await fetch(fileUrl);
+      const fileBlob = await fileRes.blob();
+      const downloadUrl = URL.createObjectURL(fileBlob);
+
+      const downloadLink = document.createElement("a");
+      downloadLink.href = downloadUrl;
+      downloadLink.download = finalFilename; // ✅ gunakan nama file final
+      document.body.appendChild(downloadLink);
+      downloadLink.click();
+      document.body.removeChild(downloadLink);
+
+      URL.revokeObjectURL(downloadUrl);
+    } else {
+      console.error("❌ File path tidak ditemukan di response server");
+    }
+  } catch (error) {
+    console.error("Error downloading/saving image:", error);
+  }
+};
 
     useImperativeHandle(ref, () => ({
       download: handleDownload,

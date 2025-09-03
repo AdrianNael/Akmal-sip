@@ -9,12 +9,25 @@ const sharp = require("sharp");
 const app = express();
 app.use(cors());
 
-const upload = multer({ dest: "uploads/" });
+const upload = multer({ dest: "uploads/tmp" });
 
-app.get("/", (req, res) => {
-  res.send("RemoveBG Backend is running!");
-});
+// path ke file counter
+const counterFile = path.join(__dirname, "uploads", "idcards", "counters.json");
 
+// load counter dari file
+function loadCounters() {
+  if (!fs.existsSync(counterFile)) return {};
+  return JSON.parse(fs.readFileSync(counterFile, "utf-8"));
+}
+
+// simpan counter ke file
+function saveCounters(counters) {
+  fs.writeFileSync(counterFile, JSON.stringify(counters, null, 2));
+}
+
+app.use("/uploads", express.static(path.join(__dirname, "uploads")));
+
+// --- remove background ---
 app.post("/remove-background", upload.single("image"), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: "No file uploaded" });
 
@@ -23,25 +36,18 @@ app.post("/remove-background", upload.single("image"), async (req, res) => {
   const bgRemovedPath = `${inputPath}-no-bg.png`;
   const finalPath = `${inputPath}-final.png`;
 
-  const rembgPath = "rembg";
-
   try {
-    // Ambil metadata setelah inputPath ada
     const metadata = await sharp(inputPath).metadata();
 
-    // 1. Resize dulu biar hemat RAM
-    await sharp(inputPath)
-      .resize({ width: 800 }) // kalau terlalu besar, limit aja ke 800px
-      .toFile(resizedPath);
+    await sharp(inputPath).resize({ width: 800 }).toFile(resizedPath);
 
-    // 2. Jalankan rembg
     const cmd = `rembg i -a \
-    --alpha-matting \
-    --alpha-matting-foreground-threshold 240 \
-    --alpha-matting-background-threshold 10 \
-    --alpha-matting-erode-size 10 \
-    --post-process-mask \
-    "${resizedPath}" "${bgRemovedPath}"`;
+      --alpha-matting \
+      --alpha-matting-foreground-threshold 240 \
+      --alpha-matting-background-threshold 10 \
+      --alpha-matting-erode-size 10 \
+      --post-process-mask \
+      "${resizedPath}" "${bgRemovedPath}"`;
 
     exec(cmd, async (error) => {
       if (error) {
@@ -50,7 +56,6 @@ app.post("/remove-background", upload.single("image"), async (req, res) => {
       }
 
       try {
-        // 3. Perbesar hasil sesuai ukuran asli + haluskan edge
         await sharp(bgRemovedPath)
           .resize({ width: metadata.width })
           .blur(0.3)
@@ -58,9 +63,7 @@ app.post("/remove-background", upload.single("image"), async (req, res) => {
           .toFile(finalPath);
 
         res.sendFile(path.resolve(finalPath), (err) => {
-          if (err) {
-            console.error("SendFile error:", err);
-          }
+          if (err) console.error("SendFile error:", err);
 
           [inputPath, resizedPath, bgRemovedPath, finalPath].forEach((p) => {
             fs.unlink(p, (err) => {
@@ -79,7 +82,73 @@ app.post("/remove-background", upload.single("image"), async (req, res) => {
   }
 });
 
-const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
+// --- save idcard ---
+app.post("/save-idcard", upload.single("file"), async (req, res) => {
+  if (!req.file) {
+    console.error("❌ No file uploaded");
+    return res.status(400).json({ error: "No file uploaded" });
+  }
+
+  try {
+    const { prodi, nim, name } = req.body;
+    console.log("📩 Request diterima:", { prodi, nim, name, file: req.file });
+
+    // counter unik per nim+prodi
+    const baseKey = `${nim}_${prodi}`;
+    let counters = loadCounters();
+    const safeProdi = prodi.replace(/\s+/g, "_");
+
+    console.log("📊 Counters sebelum:", counters);
+
+    let counter = counters[baseKey] ? counters[baseKey] + 1 : 1;
+    counters[baseKey] = counter;
+    saveCounters(counters);
+
+    console.log(`🔢 Counter untuk ${baseKey}:`, counter);
+
+    // bikin folder per prodi
+    const prodiDir = path.join(__dirname, "uploads", "idcards", safeProdi);
+    console.log("📂 Target folder:", prodiDir);
+
+    if (!fs.existsSync(prodiDir)) {
+      fs.mkdirSync(prodiDir, { recursive: true });
+      console.log("📁 Folder dibuat:", prodiDir);
+    } else {
+      console.log("✅ Folder sudah ada:", prodiDir);
+    }
+
+    // nama file akhir
+    const safeName = name.replace(/\s+/g, "_");
+    const filename = `${nim}_${safeName}_${safeProdi}_${counter}.png`;
+
+    const targetPath = path.join(prodiDir, filename);
+    console.log("🎯 Target file:", targetPath);
+
+    // pindahkan file dari tmp → folder tujuan
+    fs.renameSync(req.file.path, targetPath);
+    console.log(
+      "✅ File berhasil dipindahkan:",
+      req.file.path,
+      "→",
+      targetPath
+    );
+
+    return res.json({
+      success: true,
+      message: "File berhasil disimpan",
+      filePath: `/uploads/idcards/${safeProdi}/${filename}`,
+      counter: counter,
+    });
+  } catch (err) {
+    console.error("❌ Save error:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to save file",
+      error: err.message, // biar tau pesan error aslinya
+      stack: err.stack, // biar keliatan trace errornya
+    });
+  }
 });
+
+const PORT = process.env.PORT || 5000;
+app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
